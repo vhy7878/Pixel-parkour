@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Pixel Parkour — Easy Obby</title>
+<style>
+  :root{color-scheme:dark;--ink:#18233d;--panel:#26375b;--mint:#8ef0b0;--gold:#ffd85c}
+  *{box-sizing:border-box}
+  body{margin:0;background:#111a30;color:#f4f7ff;font-family:system-ui,-apple-system,Segoe UI,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px}
+  .wrap{width:min(100%,960px)}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  h1{font-size:clamp(1.3rem,3vw,2rem);margin:0;letter-spacing:.02em}
+  .sub{color:#b9c7e8;font-size:.9rem;margin-top:3px}
+  .hud{display:flex;gap:8px;flex-wrap:wrap}
+  .pill{background:#26375b;border:2px solid #3e5482;border-radius:10px;padding:7px 11px;font-weight:800;font-size:.9rem}
+  .gamebox{position:relative;border:4px solid #425a8a;border-radius:12px;overflow:hidden;background:#8bd9f5;box-shadow:0 14px 40px #0005}
+  canvas{display:block;width:100%;height:auto;image-rendering:pixelated;touch-action:none}
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#111a30b8;padding:18px;text-align:center}
+  .overlay.hidden{display:none}
+  .modal{max-width:420px;background:#1d2b4b;border:3px solid #6883b9;border-radius:14px;padding:22px;box-shadow:0 8px 0 #10182b}
+  .modal h2{margin:0 0 8px;font-size:1.7rem}
+  .modal p{color:#d1ddf8;line-height:1.45}
+  button{font:inherit;font-weight:800;border:0;border-radius:10px;background:#8ef0b0;color:#153329;padding:11px 16px;cursor:pointer;box-shadow:0 4px 0 #4eac78}
+  button:active{transform:translateY(2px);box-shadow:0 2px 0 #4eac78}
+  .controls{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;flex-wrap:wrap}
+  .hint{font-size:.9rem;color:#c6d2ee;line-height:1.5}
+  .touch{display:flex;gap:10px;touch-action:none}
+  .touch button{width:62px;height:54px;font-size:1.25rem;background:#ffd85c;color:#3b2b09;box-shadow:0 4px 0 #c49b25;user-select:none}
+  .touch .jump{width:86px;background:#8ef0b0;box-shadow:0 4px 0 #4eac78;color:#153329}
+  .tiny{font-size:.78rem;color:#91a4cc;margin-top:12px}
+  @media (min-width:760px){.touch{opacity:.92}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>🟩 Pixel Parkour</h1><div class="sub">EASY OBBY · Collect coins · Reach the flag!</div></div>
+    <div class="hud">
+      <div class="pill">🪙 <span id="coins">0</span>/8</div>
+      <div class="pill">🚩 Checkpoint <span id="cp">1</span>/2</div>
+      <div class="pill">❤️ Falls <span id="falls">0</span></div>
+    </div>
+  </header>
+  <div class="gamebox">
+    <canvas id="game" width="800" height="450" aria-label="Pixel Parkour game"></canvas>
+    <div class="overlay" id="overlay">
+      <div class="modal">
+        <h2 id="modalTitle">Pixel Parkour!</h2>
+        <p id="modalText">A tiny, friendly obstacle course. Jump across the gaps, grab all the coins you can, and touch the golden flag.</p>
+        <button id="startBtn">▶ Play now</button>
+      </div>
+    </div>
+  </div>
+  <div class="controls">
+    <div class="hint"><b>Keyboard:</b> ← → or A/D to move · Space / ↑ to jump<br><b>Goal:</b> Reach the flag at the end. Falling sends you back to a checkpoint.</div>
+    <div class="touch" aria-label="Touch controls">
+      <button id="leftBtn" aria-label="Move left">◀</button>
+      <button id="rightBtn" aria-label="Move right">▶</button>
+      <button class="jump" id="jumpBtn" aria-label="Jump">JUMP ⤴</button>
+    </div>
+  </div>
+  <div class="tiny">Made with HTML Canvas · Save this file as index.html to publish it online.</div>
+</div>
+<script>
+(() => {
+ const canvas=document.getElementById('game'), ctx=canvas.getContext('2d');
+ const W=800,H=450, TILE=32;
+ const $=id=>document.getElementById(id);
+ let running=false, won=false, camera=0, coinCount=0, falls=0, checkpoint=0;
+ const keys={left:false,right:false};
+ const platforms=[
+  {x:0,y:370,w:300,h:80},{x:350,y:340,w:150,h:110},{x:545,y:310,w:145,h:140},
+  {x:735,y:355,w:160,h:95},{x:935,y:320,w:145,h:130},{x:1120,y:285,w:150,h:165},
+  {x:1310,y:335,w:160,h:115},{x:1510,y:300,w:180,h:150},{x:1730,y:350,w:190,h:100},
+  {x:1960,y:315,w:180,h:135},{x:2180,y:350,w:240,h:100}
+ ];
+ const coins=[
+  {x:150,y:320},{x:260,y:300},{x:405,y:290},{x:610,y:260},
+  {x:820,y:310},{x:995,y:270},{x:1180,y:235},{x:1600,y:250}
+ ];
+ const checkpoints=[{x:935,y:280},{x:1730,y:310}];
+ const goalX=2350;
+ const player={x:45,y:320,w:23,h:30,vx:0,vy:0,onGround:false,spawnX:45,spawnY:320};
+ function hud(){ $('coins').textContent=coinCount; $('falls').textContent=falls; $('cp').textContent=checkpoint+1; }
+ function start(){running=true;won=false;$('overlay').classList.add('hidden');requestAnimationFrame(loop)}
+ $('startBtn').addEventListener('click',()=>{if(won)reset();start()});
+ function reset(){coinCount=0;falls=0;checkpoint=0;camera=0;player.x=45;player.y=320;player.vx=player.vy=0;player.spawnX=45;player.spawnY=320;coins.forEach(c=>c.got=false);hud();$('modalTitle').textContent='Pixel Parkour!';$('modalText').textContent='Jump across the gaps, collect coins, and reach the golden flag.';$('startBtn').textContent='▶ Play now';}
+ function jump(){if(!running){start();return} if(player.onGround){player.vy=-10.6;player.onGround=false}}
+ document.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp',' ','a','A','d','D','w','W'].includes(e.key))e.preventDefault();
+  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A')keys.left=true;
+  if(e.key==='ArrowRight'||e.key==='d'||e.key==='D')keys.right=true;
+  if(e.key===' '||e.key==='ArrowUp'||e.key==='w'||e.key==='W') {if(!e.repeat)jump();}
+  if(e.key==='Enter'&&!running)start();
+ });
+ document.addEventListener('keyup',e=>{if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A')keys.left=false;if(e.key==='ArrowRight'||e.key==='d'||e.key==='D')keys.right=false;});
+ function hold(id,key){const b=$(id);const down=e=>{e.preventDefault();keys[key]=true};const up=e=>{e.preventDefault();keys[key]=false};b.addEventListener('pointerdown',down);['pointerup','pointercancel','pointerleave'].forEach(ev=>b.addEventListener(ev,up));}
+ hold('leftBtn','left');hold('rightBtn','right');$('jumpBtn').addEventListener('pointerdown',e=>{e.preventDefault();jump()});
+ function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),w,h)}
+ function pixelText(text,x,y,size,color){ctx.font=`bold ${size}px monospace`;ctx.fillStyle=color;ctx.fillText(text,x,y)}
+ function drawBackground(){
+  rect(0,0,W,H,'#8bd9f5');
+  // pixel clouds
+  for(let i=0;i<7;i++){let x=((i*157-camera*.18)%(W+120)+W+120)%(W+120)-60,y=42+(i%3)*42;
+   rect(x,y,58,14,'#f3fbff');rect(x+12,y-10,30,12,'#f3fbff');rect(x+7,y+14,43,7,'#d5f3ff');
+  }
+  // far hills
+  for(let i=0;i<8;i++){let x=i*150-(camera*.35%150);rect(x,270,90,45,'#75c98b');rect(x+18,250,50,25,'#75c98b');rect(x+35,235,22,18,'#75c98b')}
+  // tiny flowers on background ground
+  for(let i=0;i<20;i++){let x=((i*61-camera*.55)%(W+40)+W+40)%(W+40);rect(x,333,4,4,i%2?'#fff17a':'#ff9bd0')}
+ }
+ function drawPlatform(p){
+  const x=Math.round(p.x-camera);if(x+p.w<0||x>W)return;
+  rect(x,p.y,p.w,p.h,'#a96b43');rect(x,p.y,p.w,10,'#4bc76b');rect(x,p.y+10,p.w,5,'#2e9654');
+  for(let xx=0;xx<p.w;xx+=32){rect(x+xx,p.y+22,16,5,'#c88958');rect(x+xx+16,p.y+42,16,5,'#865034');rect(x+xx+5,p.y+58,10,4,'#865034')}
+  for(let xx=8;xx<p.w;xx+=32){rect(x+xx,p.y-4,5,4,'#76e58b');}
+ }
+ function drawCoin(c){if(c.got)return;let x=Math.round(c.x-camera),y=c.y;if(x<-20||x>W+20)return;
+  rect(x-5,y-9,10,18,'#f6a623');rect(x-3,y-12,6,24,'#ffd85c');rect(x-1,y-8,2,16,'#fff3a6');rect(x-2,y-5,4,3,'#fff3a6');
+ }
+ function drawPlayer(){
+  const x=Math.round(player.x-camera),y=Math.round(player.y);
+  // shadow
+  rect(x-2,player.y+player.h,27,4,'#4c8e8a');
+  // shoes, legs, body, arms, face
+  rect(x+3,y+24,7,6,'#273c78');rect(x+14,y+24,7,6,'#273c78');
+  rect(x+4,y+10,16,15,'#ef5964');rect(x+1,y+12,5,10,'#f8bb8c');rect(x+19,y+12,5,10,'#f8bb8c');
+  rect(x+3,y,18,13,'#f8bb8c');rect(x+2,y-2,19,5,'#603d73');rect(x+4,y-5,13,5,'#603d73');
+  rect(x+8,y+5,3,3,'#26324d');rect(x+16,y+5,3,3,'#26324d');rect(x+10,y+9,7,2,'#fff');
+ }
+ function drawFlag(x,y){let sx=x-camera;rect(sx,y,5,65,'#f7f3dc');rect(sx+5,y+3,34,22,'#ffd85c');rect(sx+5,y+3,17,11,'#ff8f45');rect(sx+22,y+14,17,11,'#ff8f45');rect(sx-7,y+65,20,6,'#26375b');}
+ function update(){
+  if(keys.left)player.vx-=.55;if(keys.right)player.vx+=.55;
+  if(!keys.left&&!keys.right)player.vx*=.78;
+  player.vx=Math.max(-3.6,Math.min(3.6,player.vx));
+  player.x+=player.vx;player.x=Math.max(0,player.x);
+  player.vy+=.48;player.vy=Math.min(12,player.vy);player.y+=player.vy;player.onGround=false;
+  for(const p of platforms){
+   if(player.vy>=0&&player.x+player.w>p.x&&player.x<p.x+p.w&&player.y+player.h>=p.y&&player.y+player.h-player.vy<=p.y){
+    player.y=p.y-player.h;player.vy=0;player.onGround=true;
+   }
+  }
+  for(const c of coins){if(!c.got&&Math.abs((player.x+player.w/2)-c.x)<20&&Math.abs((player.y+player.h/2)-c.y)<24){c.got=true;coinCount++;hud()}}
+  checkpoints.forEach((c,i)=>{if(player.x+player.w>c.x&&player.x<c.x+25&&checkpoint<i+1){checkpoint=i+1;player.spawnX=c.x+8;player.spawnY=c.y;hud()}});
+  if(player.y>H+100){falls++;player.x=player.spawnX;player.y=player.spawnY;player.vx=player.vy=0;hud()}
+  if(player.x+player.w>=goalX){win()}
+  camera=Math.max(0,Math.min(goalX-W+70,player.x-220));
+ }
+ function win(){if(won)return;won=true;running=false;$('modalTitle').textContent='🏆 Course complete!';$('modalText').textContent=`You reached the flag with ${coinCount}/8 coins and ${falls} falls. Great parkour!`; $('startBtn').textContent='↻ Play again';$('overlay').classList.remove('hidden')}
+ function draw(){
+  drawBackground();platforms.forEach(drawPlatform);
+  checkpoints.forEach((c,i)=>{let x=c.x-camera;if(x>-20&&x<W){rect(x,c.y+20,5,40,'#e8f3ff');rect(x+5,c.y+20,22,15,checkpoint>=i+1?'#8ef0b0':'#ffd85c');rect(x+5,c.y+20,10,7,'#ff8f45')}});
+  coins.forEach(drawCoin);drawFlag(goalX,280);drawPlayer();
+  // progress bar
+  rect(16,16,190,12,'#26375b');rect(19,19,184,6,'#4c5d7e');rect(19,19,184*Math.min(1,player.x/goalX),6,'#8ef0b0');
+  pixelText('GO!',W-65,30,15,'#26375b');
+ }
+ function loop(){if(!running)return;update();draw();requestAnimationFrame(loop)}
+ reset();draw();
+})();
+</script>
+</body>
+</html>
